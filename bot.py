@@ -531,9 +531,22 @@ def user_stats(uid: str) -> dict:
 def webapp_url(uid: str) -> str:
     if not WEBAPP_URL:
         return ""
-    q = urllib.parse.urlencode({"uid": uid, **user_stats(uid)})
+    q = urllib.parse.urlencode({"uid": uid, **user_stats(uid), "t": int(time.time())})
     sep = "&" if "?" in WEBAPP_URL else "?"
     return f"{WEBAPP_URL}{sep}{q}"
+
+
+async def update_menu_button(bot: Bot, chat_id: int, uid: str) -> None:
+    url = webapp_url(uid)
+    if not url:
+        return
+    try:
+        await bot.set_chat_menu_button(
+            chat_id=chat_id,
+            menu_button=MenuButtonWebApp(text="Mini App", web_app=WebAppInfo(url=url)),
+        )
+    except Exception:
+        pass
 
 
 def mini_app_keyboard(uid: str) -> InlineKeyboardMarkup | None:
@@ -1340,6 +1353,7 @@ async def on_text(message: Message, bot: Bot) -> None:
     limit_inc(uid)
     start_cooldown(uid)
     bump_stats(uid, chars=len(text))
+    await update_menu_button(bot, message.chat.id, uid)
     await answer_with_ai(message, bot, text)
 
 
@@ -1391,6 +1405,7 @@ async def on_voice(message: Message, bot: Bot) -> None:
         return
 
     bump_stats(str(message.from_user.id), chars=len(recognized), voice=1)
+    await update_menu_button(bot, message.chat.id, str(message.from_user.id))
     await message.answer(f"🎤 Услышал: «{recognized}»")
     await answer_with_ai(message, bot, recognized)
 
