@@ -91,6 +91,12 @@ LIMITS_FILE = os.path.join(DATA_DIR, "limits.json")
 PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
 BANS_FILE = os.path.join(DATA_DIR, "bans.json")
 MUTES_FILE = os.path.join(DATA_DIR, "mutes.json")
+ROLES_FILE = os.path.join(DATA_DIR, "roles.json")
+
+OWNER_ID = (os.getenv("OWNER_ID") or "").strip()
+SECRET_MIN_ROLE = (os.getenv("SECRET_MIN_ROLE") or "owner").strip().lower()
+ROLE_LEVELS = {"user": 0, "moder": 1, "admin": 2, "owner": 3}
+SECRET_MIN_LEVEL = ROLE_LEVELS.get(SECRET_MIN_ROLE, 3)
 VOICES_FILE = os.path.join(DATA_DIR, "voices.json")
 CHATSTATS_FILE = os.path.join(DATA_DIR, "chatstats.json")
 TOKENS_FILE = os.path.join(DATA_DIR, "tokens.json")
@@ -104,6 +110,11 @@ RANKS = [
     ("voice", "🎤 Голос", "voice", int(os.getenv("RANK_VOICE_VOICE") or "10"), int(os.getenv("RANK_VOICE_TOKENS") or "10000"), 0),
     ("active", "🔥 Активный", "msgs", int(os.getenv("RANK_ACTIVE_MSGS") or "500"), 0, int(os.getenv("RANK_ACTIVE_COOLDOWN") or "10")),
     ("loyal", "📅 Верный друг", "days", int(os.getenv("RANK_LOYAL_DAYS") or "3"), int(os.getenv("RANK_LOYAL_TOKENS") or "25000"), 0),
+    ("energetic", "⚡ Энергичный", "msgs", int(os.getenv("RANK_ENERGETIC_MSGS") or "50"), int(os.getenv("RANK_ENERGETIC_TOKENS") or "5000"), 0),
+    ("smart", "🧠 Умник", "msgs", int(os.getenv("RANK_SMART_MSGS") or "250"), int(os.getenv("RANK_SMART_TOKENS") or "20000"), 0),
+    ("veteran", "🏆 Ветеран", "msgs", int(os.getenv("RANK_VETERAN_MSGS") or "1000"), int(os.getenv("RANK_VETERAN_TOKENS") or "100000"), 0),
+    ("legend", "🌟 Легенда", "msgs", int(os.getenv("RANK_LEGEND_MSGS") or "5000"), int(os.getenv("RANK_LEGEND_TOKENS") or "500000"), 5),
+    ("guru", "👑 Гуру", "msgs", int(os.getenv("RANK_GURU_MSGS") or "10000"), int(os.getenv("RANK_GURU_TOKENS") or "1000000"), 3),
 ]
 
 history: dict[str, list[dict]] = {}
@@ -117,6 +128,7 @@ _chatstats: dict = {"requests": 0, "refused": 0, "done": 0}
 _tokens: dict[str, dict] = {}
 _admin_pending: dict[str, str] = {}
 _prompts: dict = {"active": "default", "items": {}}
+_roles: dict[str, str] = {}
 
 
 # ---------- память диалога ----------
@@ -464,8 +476,44 @@ def detect_code_request(text: str) -> bool:
     return any(word in low for word in CODE_WORDS)
 
 
+def load_roles() -> None:
+    try:
+        with open(ROLES_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _roles.update({str(k): str(v) for k, v in data.items()})
+    except (OSError, ValueError):
+        pass
+
+
+def save_roles() -> None:
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(ROLES_FILE, "w", encoding="utf-8") as f:
+            json.dump(_roles, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def role_of(uid: str) -> str:
+    if OWNER_ID and uid == OWNER_ID:
+        return "owner"
+    if not OWNER_ID and uid in ADMIN_IDS:
+        return "owner"
+    return _roles.get(uid, "user")
+
+
+def role_level(uid: str) -> int:
+    return ROLE_LEVELS.get(role_of(uid), 0)
+
+
+def set_role(uid: str, role: str) -> None:
+    _roles[uid] = role
+    save_roles()
+
+
 def is_admin(uid: str) -> bool:
-    return uid in ADMIN_IDS
+    return role_level(uid) >= SECRET_MIN_LEVEL
 
 
 def user_stats(uid: str) -> dict:
@@ -501,8 +549,17 @@ dp = Dispatcher()
 
 
 @dp.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, bot: Bot) -> None:
     uid = str(message.from_user.id)
+    url = webapp_url(uid)
+    if url:
+        try:
+            await bot.set_chat_menu_button(
+                chat_id=message.chat.id,
+                menu_button=MenuButtonWebApp(text="Mini App", web_app=WebAppInfo(url=url)),
+            )
+        except Exception:
+            pass
     await message.answer(
         "Привет! Я Komi — ИИ-помощник 🤖\n\n"
         "Пиши текстом или отправляй голосовое — я пойму и отвечу текстом.\n"
@@ -632,9 +689,24 @@ async def cmd_whoami(message: Message) -> None:
         f"📊 Сообщений: {s['msgs']}, голосовых: {s['voice']}\n"
         f"📅 Лимит на сегодня: {limit_text}\n"
         f"🔤 Токенов сегодня: {token_text}\n"
+        f"👑 Роль: {role_of(uid)}\n"
         f"🏅 Ранги: {rank_text}\n"
         f"🎁 Бонусы: {bonus_text}"
     )
+
+
+@dp.message(Command("role"))
+async def cmd_role(message: Message, command: CommandObject) -> None:
+    uid = str(message.from_user.id)
+    if role_level(uid) < 3:
+        await message.answer("Недоступно.")
+        return
+    args = (command.args or "").split()
+    if len(args) < 2 or not args[0].isdigit() or args[1] not in ROLE_LEVELS:
+        await message.answer("Формат: /role ID owner|admin|moder|user")
+        return
+    set_role(args[0], args[1])
+    await message.answer(f"👑 {args[0]} → {args[1]}")
 
 
 @dp.message(Command("admin"))
@@ -653,8 +725,9 @@ async def cmd_admin(message: Message) -> None:
              InlineKeyboardButton(text="🚫 Баны", callback_data="admin_bans")],
             [InlineKeyboardButton(text="🔇 Мьюты", callback_data="admin_mutes"),
              InlineKeyboardButton(text="📣 Рассылка", callback_data="admin_broadcast")],
-            [InlineKeyboardButton(text="🧠 Промпт", callback_data="admin_prompt"),
-             InlineKeyboardButton(text="❌ Закрыть", callback_data="admin_close")],
+            [InlineKeyboardButton(text="👑 Роли", callback_data="admin_roles"),
+             InlineKeyboardButton(text="🧠 Промпт", callback_data="admin_prompt")],
+            [InlineKeyboardButton(text="❌ Закрыть", callback_data="admin_close")],
         ]
     )
     await message.answer(
@@ -967,6 +1040,11 @@ async def on_callback(cq: CallbackQuery, bot: Bot) -> None:
             )
         elif action == "broadcast":
             await cq.message.answer("📣 Отправь: /broadcast текст")
+        elif action == "roles":
+            await cq.message.answer(
+                "👑 Роли\nНазначить: /role ID admin|moder|user\n"
+                "Доступ к секретным командам: SECRET_MIN_ROLE в .env"
+            )
         elif action == "prompt":
             active = _prompts.get("active", "default")
             keys = ["default", *(_prompts.get("items") or {}).keys()]
@@ -1580,6 +1658,7 @@ async def main() -> None:
     load_chatstats()
     load_tokens()
     load_prompts()
+    load_roles()
 
     if PROXY:
         logger.info("Использую прокси: %s", PROXY)
