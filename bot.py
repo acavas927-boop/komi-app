@@ -77,7 +77,7 @@ PERSONAS = {
     "default": ("Komi", ""),
     "teacher": ("Учитель", "Ты — Komi в режиме учителя. Объясняй простыми словами, по шагам, с примерами и проверкой понимания."),
     "psychologist": ("Психолог", "Ты — Komi в режиме поддержки. Слушай внимательно, поддерживай, задавай мягкие вопросы, не ставь диагнозов."),
-    "coder": ("Кодер", "Ты — Komi в режиме программиста. Помогай с кодом, объясняй решения, предлагай лучшие практики, давай примеры."),
+    "coder": ("Кодер", "Ты — Komi в режиме программиста. Помогай с кодом, объясняй решения, предлагай лучшие практики, давай примеры, пиши проффесионально пиши код но коротко спроси пользователя с деталях."),
     "joker": ("Анекдотчик", "Ты — Komi в режиме юмора. Отвечай с шутками, мемами и лёгким сарказмом, но по делу."),
     "lazy": ("Ленивый", "Ты — Komi в режиме нарочитой лени. На любую задачу сначала отказывайся с юмором и ленью, предлагай «давай потом», «мне лень». Если пользователь настоятельно просит или вежливо уговаривает — нехотя соглашайся и делай хорошо."),
 }
@@ -92,6 +92,15 @@ PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
 BANS_FILE = os.path.join(DATA_DIR, "bans.json")
 MUTES_FILE = os.path.join(DATA_DIR, "mutes.json")
 ROLES_FILE = os.path.join(DATA_DIR, "roles.json")
+
+ELISART_BASE_URL = (os.getenv("ELISART_BASE_URL") or ai.CUSTOM_BASE_URL).rstrip("/")
+ELISART_KEY = (os.getenv("ELISART_KEY") or ai.CUSTOM_KEY).strip()
+REFORM_BASE_URL = (os.getenv("REFORM_BASE_URL") or "").rstrip("/")
+REFORM_KEY = (os.getenv("REFORM_KEY") or "").strip()
+PROVIDERS = {
+    "elisart": (ELISART_BASE_URL, ELISART_KEY),
+    "reformboss": (REFORM_BASE_URL, REFORM_KEY),
+}
 
 OWNER_ID = (os.getenv("OWNER_ID") or "").strip()
 SECRET_MIN_ROLE = (os.getenv("SECRET_MIN_ROLE") or "owner").strip().lower()
@@ -739,6 +748,8 @@ async def cmd_admin(message: Message) -> None:
             [InlineKeyboardButton(text="🔇 Мьюты", callback_data="admin_mutes"),
              InlineKeyboardButton(text="📣 Рассылка", callback_data="admin_broadcast")],
             [InlineKeyboardButton(text="👑 Роли", callback_data="admin_roles"),
+             InlineKeyboardButton(text="🤖 Модели", callback_data="admin_models")],
+            [InlineKeyboardButton(text="🔌 Провайдер", callback_data="admin_provider"),
              InlineKeyboardButton(text="🧠 Промпт", callback_data="admin_prompt")],
             [InlineKeyboardButton(text="❌ Закрыть", callback_data="admin_close")],
         ]
@@ -821,6 +832,41 @@ async def cmd_chatstats(message: Message) -> None:
     )
 
 
+@dp.message(Command("models"))
+async def cmd_models(message: Message) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    text, kb = await models_view()
+    await message.answer(text, reply_markup=kb)
+
+
+@dp.message(Command("provider"))
+async def cmd_provider(message: Message) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    text, kb = provider_view()
+    await message.answer(text, reply_markup=kb)
+
+
+@dp.message(Command("bench"))
+async def cmd_bench(message: Message) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    await message.answer(await bench_speed())
+
+
+@dp.message(Command("thinking"))
+async def cmd_thinking(message: Message) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    text, kb = thinking_view()
+    await message.answer(text, reply_markup=kb)
+
+
 @dp.message(Command("vpn"))
 async def cmd_vpn(message: Message) -> None:
     if not is_admin(str(message.from_user.id)):
@@ -833,12 +879,7 @@ async def cmd_vpn(message: Message) -> None:
     )
 
 
-@dp.message(Command("showsp"))
-async def cmd_showsp(message: Message) -> None:
-    uid = str(message.from_user.id)
-    if not is_admin(uid):
-        await message.answer("Недоступно.")
-        return
+def showsp_text() -> str:
     usage = ai.get_usage()
     lines = [
         "🔑 Ключи и расход",
@@ -865,7 +906,15 @@ async def cmd_showsp(message: Message) -> None:
         lines.append("\n👥 Топ ID по вызовам:")
         for target, stat in users:
             lines.append(f"• {target} — {stat.get('calls', 0)} выз., ${float(stat.get('cost', 0)):.4f}")
-    await message.answer("\n".join(lines))
+    return "\n".join(lines)
+
+
+@dp.message(Command("showsp"))
+async def cmd_showsp(message: Message) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    await message.answer(showsp_text())
 
 
 @dp.message(Command("mute"))
@@ -910,6 +959,117 @@ async def cmd_unmute(message: Message, command: CommandObject) -> None:
         await message.answer(f"✅ {target} размьючен.")
     else:
         await message.answer("Он не в муте.")
+
+
+async def fetch_models() -> list[str]:
+    base, key = ai.CUSTOM_BASE_URL, ai.CUSTOM_KEY
+    if not base or not key:
+        return []
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+    }
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
+            async with s.get(f"{base}/models", headers=headers) as r:
+                if r.status != 200:
+                    return []
+                data = await r.json()
+        return [m["id"] for m in data.get("data", [])][:24]
+    except Exception:
+        return []
+
+
+def switch_provider(name: str) -> bool:
+    base, key = PROVIDERS.get(name, ("", ""))
+    if not base or not key:
+        return False
+    ai.CUSTOM_BASE_URL = base
+    ai.CUSTOM_KEY = key
+    _save_env_value("CUSTOM_BASE_URL", base)
+    _save_env_value("CUSTOM_KEY", key)
+    _save_env_value("CUSTOM_PROVIDER", name)
+    return True
+
+
+async def models_view() -> tuple[str, InlineKeyboardMarkup | None]:
+    models = await fetch_models()
+    if not models:
+        return "Не удалось получить модели провайдера.", None
+    rows = []
+    for i in range(0, len(models), 3):
+        rows.append([
+            InlineKeyboardButton(text=m, callback_data=f"model_set:{m}")
+            for m in models[i:i + 3]
+        ])
+    rows.append([
+        InlineKeyboardButton(text="⚡ Скорость", callback_data="bench"),
+        InlineKeyboardButton(text="🧠 Thinking", callback_data="thinking"),
+    ])
+    return (
+        f"🧠 Текущая модель: {ai.CUSTOM_MODEL}\nВыбери новую:",
+        InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+def provider_view() -> tuple[str, InlineKeyboardMarkup]:
+    rows = [[InlineKeyboardButton(text=name, callback_data=f"provider_set:{name}")] for name in PROVIDERS]
+    return (
+        f"🔌 Провайдер: {getattr(ai, 'CUSTOM_PROVIDER', 'elisart')}\nВыбери:",
+        InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+THINKING_LEVELS = ["min", "low", "medium", "high", "max", "off"]
+
+
+async def bench_speed() -> str:
+    base, key = ai.CUSTOM_BASE_URL, ai.CUSTOM_KEY
+    if not base or not key:
+        return "Нет провайдера для замера."
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+    }
+    payload = {
+        "model": ai.CUSTOM_MODEL,
+        "messages": [{"role": "user", "content": "Напиши ровно 40 слов о коте."}],
+        "max_tokens": 120,
+    }
+    started = time.time()
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
+            async with s.post(f"{base}/chat/completions", json=payload, headers=headers) as r:
+                data = await r.json()
+        elapsed = max(0.1, time.time() - started)
+        tokens = int((data.get("usage") or {}).get("completion_tokens") or 0)
+        if tokens <= 0:
+            return "Не удалось замерить (нет токенов)."
+        return f"⚡ {ai.CUSTOM_MODEL}: {tokens} токенов за {elapsed:.1f} с → **{tokens / elapsed:.1f} ток/сек**"
+    except Exception as exc:
+        return f"Ошибка замера: {exc}"
+
+
+def thinking_view() -> tuple[str, InlineKeyboardMarkup]:
+    rows = []
+    for i in range(0, len(THINKING_LEVELS), 3):
+        rows.append([
+            InlineKeyboardButton(text=lvl, callback_data=f"thinking_set:{lvl}")
+            for lvl in THINKING_LEVELS[i:i + 3]
+        ])
+    return (
+        f"🧠 Thinking: {getattr(ai, 'AI_THINKING', 'low')}\n"
+        "min — быстрее, max — глубже (если модель поддерживает).",
+        InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 async def fetch_text(url: str) -> str | None:
@@ -996,6 +1156,38 @@ async def on_callback(cq: CallbackQuery, bot: Bot) -> None:
     await cq.answer()
     uid = str(cq.from_user.id)
     data = cq.data or ""
+    if data in ("bench", "thinking") or data.startswith("thinking_set:"):
+        if not is_admin(uid):
+            await cq.answer("Недоступно", show_alert=True)
+            return
+        if data == "bench":
+            await cq.message.answer(await bench_speed())
+        elif data == "thinking":
+            text, kb = thinking_view()
+            await cq.message.answer(text, reply_markup=kb)
+        else:
+            lvl = data.split(":", 1)[1]
+            ai.AI_THINKING = "" if lvl == "off" else lvl
+            _save_env_value("AI_THINKING", lvl)
+            await cq.message.answer(f"🧠 Thinking: {lvl}")
+        return
+    if data.startswith("model_set:") or data.startswith("provider_set:"):
+        if not is_admin(uid):
+            await cq.answer("Недоступно", show_alert=True)
+            return
+        if data.startswith("model_set:"):
+            model = data.split(":", 1)[1]
+            ai.CUSTOM_MODEL = model
+            _save_env_value("CUSTOM_MODEL", model)
+            text, kb = thinking_view()
+            await cq.message.answer(f"✅ Модель: {model}\n{text}", reply_markup=kb)
+        else:
+            name = data.split(":", 1)[1]
+            if switch_provider(name):
+                await cq.message.answer(f"✅ Провайдер: {name}")
+            else:
+                await cq.message.answer("У провайдера нет ключа.")
+        return
     if data.startswith("prompt_set:") or data in ("prompt_edit", "prompt_new"):
         if not is_admin(uid):
             await cq.answer("Недоступно", show_alert=True)
@@ -1030,7 +1222,7 @@ async def on_callback(cq: CallbackQuery, bot: Bot) -> None:
                 f"🤖 ИИ: {ai.provider()} ({len(ai.candidates())})"
             )
         elif action == "keys":
-            await cmd_showsp(cq.message)
+            await cq.message.answer(showsp_text())
         elif action == "daily":
             _admin_pending[uid] = "daily"
             await cq.message.answer("📩 Отправь /число, например /100. 0 — без лимита.")
@@ -1058,6 +1250,12 @@ async def on_callback(cq: CallbackQuery, bot: Bot) -> None:
                 "👑 Роли\nНазначить: /role ID admin|moder|user\n"
                 "Доступ к секретным командам: SECRET_MIN_ROLE в .env"
             )
+        elif action == "models":
+            text, kb = await models_view()
+            await cq.message.answer(text, reply_markup=kb)
+        elif action == "provider":
+            text, kb = provider_view()
+            await cq.message.answer(text, reply_markup=kb)
         elif action == "prompt":
             active = _prompts.get("active", "default")
             keys = ["default", *(_prompts.get("items") or {}).keys()]
@@ -1126,7 +1324,7 @@ async def animate_thinking(msg: Message) -> None:
         except Exception:
             pass
         i += 1
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
 
 async def stream_text(msg: Message, text: str) -> None:
@@ -1155,7 +1353,7 @@ async def stream_text(msg: Message, text: str) -> None:
                 pass
         except Exception:
             pass
-        await asyncio.sleep(0.08)
+        await asyncio.sleep(0.03)
 
     try:
         await msg.edit_text(text)
@@ -1564,7 +1762,7 @@ async def tunnel_watchdog(bot: Bot) -> None:
     fails = 0
     while True:
         await asyncio.sleep(60)
-        if not WEBAPP_URL:
+        if not WEBAPP_URL or "serveousercontent.com" not in WEBAPP_URL:
             continue
         if await _url_alive(WEBAPP_URL.rstrip("/") + "/health"):
             fails = 0
@@ -1638,13 +1836,13 @@ def run_update_vpn() -> None:
 async def vpn_watchdog() -> None:
     fails = 0
     while True:
-        await asyncio.sleep(45)
+        await asyncio.sleep(25)
         if await vpn_alive():
             fails = 0
             continue
         fails += 1
-        logger.warning("VPN не отвечает (%d/2)", fails)
-        if fails < 2:
+        logger.warning("VPN не отвечает (%d)", fails)
+        if fails < 1:
             continue
         logger.info("Перезапускаю Xray...")
         await asyncio.to_thread(restart_xray)
