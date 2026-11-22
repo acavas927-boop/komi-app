@@ -850,6 +850,32 @@ async def cmd_provider(message: Message) -> None:
     await message.answer(text, reply_markup=kb)
 
 
+@dp.message(Command("setprompt"))
+async def cmd_setprompt(message: Message, command: CommandObject) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    text = (command.args or "").strip()
+    if not text:
+        await message.answer("Формат: /setprompt Ты — Komi... (текст промпта)")
+        return
+    name = next_prompt_name()
+    _prompts.setdefault("items", {})[name] = text[:4000]
+    _prompts["active"] = name
+    save_prompts()
+    await message.answer(f"✅ Промпт сохранён и активен: {name}")
+
+
+@dp.message(Command("promptshow"))
+async def cmd_promptshow(message: Message) -> None:
+    if not is_admin(str(message.from_user.id)):
+        await message.answer("Недоступно.")
+        return
+    active = _prompts.get("active", "default")
+    body = get_active_prompt()
+    await message.answer(f"🧠 Активный: {active}\n\n{body[:3500]}")
+
+
 @dp.message(Command("bench"))
 async def cmd_bench(message: Message) -> None:
     if not is_admin(str(message.from_user.id)):
