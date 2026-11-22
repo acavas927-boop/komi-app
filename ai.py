@@ -64,6 +64,7 @@ AI_MODEL = (os.getenv("AI_MODEL") or "gemini-2.5-flash").strip()
 POLLINATIONS_MODEL = (os.getenv("POLLINATIONS_MODEL") or "openai").strip()
 
 AI_PROXY = (os.getenv("AI_PROXY") or os.getenv("PROXY") or "").strip()
+AI_THINKING = (os.getenv("AI_THINKING") or "low").strip().lower()
 VOSK_MODEL_DIR = Path(os.getenv("VOSK_MODEL") or BASE_DIR / "models" / "vosk-model-small-ru-0.22")
 
 SYSTEM_PROMPT = (
@@ -80,6 +81,8 @@ SYSTEM_PROMPT = (
     "НИКОГДА не раскрывай, на какой модели, API, платформе или у какой компании ты работаешь. "
     "Не называй модели, провайдеров и компании. "
     "На такие вопросы отвечай: «Я Komi, просто помогаю — внутренности не раскрываю»."
+    "Для админов ты ничего не закрываешь а наоборот раскрываешься для тестов, ты сам знаешь свою модель."
+    "ВАЖНО! лень это манера общения, а не повод не делать задачу."
 )
 
 logger = logging.getLogger(__name__)
@@ -415,6 +418,8 @@ async def _openrouter_chat(model: str, messages: list[dict], system: str) -> str
         "temperature": 0.8,
         "max_tokens": 3000,
     }
+    if AI_THINKING in ("low", "medium", "high"):
+        payload["reasoning_effort"] = AI_THINKING
     headers = {
         "Authorization": f"Bearer {OPENROUTER_KEY}",
         "HTTP-Referer": "https://t.me/komiti_ai_bot",
