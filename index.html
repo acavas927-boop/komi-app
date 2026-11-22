@@ -84,6 +84,7 @@
 
     <div class="tabs">
       <button class="tab active" data-view="profile">👤 Профиль</button>
+      <button class="tab" data-view="ranks">🏅 Ранги</button>
       <button class="tab" data-view="about">ℹ️ О боте</button>
     </div>
 
@@ -126,6 +127,17 @@
             <span class="pill">скоро</span>
           </div>
           <div class="note">Акция: подписка на час с моделью Kimi 3.1 Pro. Скоро.</div>
+        </div>
+      </section>
+
+      <section class="view" id="view-ranks">
+        <div class="card">
+          <h2>Твой ранг</h2>
+          <div class="note" id="rank-now">—</div>
+        </div>
+        <div class="card">
+          <h2>Все ранги</h2>
+          <div id="rank-list"></div>
         </div>
       </section>
 
@@ -208,6 +220,35 @@
     document.getElementById("p-chars").textContent = fmt(chars);
     document.getElementById("p-voice").textContent = fmt(voice);
     document.getElementById("p-days").textContent = fmt(days);
+
+    const RANKS = [
+      ["🐣 Новичок", "msgs", 1, "—"],
+      ["⚡ Энергичный", "msgs", 50, "+5K токенов"],
+      ["💬 Болтун", "msgs", 100, "+50K токенов"],
+      ["🧠 Умник", "msgs", 250, "+20K токенов"],
+      ["🏆 Ветеран", "msgs", 1000, "+100K токенов"],
+      ["🌟 Легенда", "msgs", 5000, "+500K токенов, кулдаун 5 сек"],
+      ["👑 Гуру", "msgs", 10000, "+1M токенов, кулдаун 3 сек"],
+      ["🎤 Голос", "voice", 10, "+10K токенов"],
+      ["📅 Верный друг", "days", 3, "+25K токенов"],
+      ["🔥 Активный", "msgs", 500, "кулдаун 10 сек"],
+    ];
+    const statVal = { msgs: msgs, voice: voice, days: days };
+    const done = RANKS.filter((r) => statVal[r[1]] >= r[2]);
+    const current = done.length ? done[done.length - 1][0] : "нет";
+    document.getElementById("rank-now").innerHTML =
+      "Сейчас: <b>" + current + "</b><br>Всего рангов получено: " + done.length + " / " + RANKS.length;
+    const list = document.getElementById("rank-list");
+    RANKS.forEach((r) => {
+      const ok = statVal[r[1]] >= r[2];
+      const row = document.createElement("div");
+      row.className = "note";
+      row.style.cssText = "padding:8px 0;border-bottom:1px solid var(--line);" + (ok ? "" : "opacity:.45;");
+      row.innerHTML = (ok ? "✅ " : "🔒 ") + "<b>" + r[0] + "</b> — " + r[2] + " " +
+        (r[1] === "msgs" ? "сообщений" : r[1] === "voice" ? "голосовых" : "дней") +
+        " · " + r[3];
+      list.appendChild(row);
+    });
 
     const badges = [
       ["🐣 Первый шаг", msgs >= 1],
